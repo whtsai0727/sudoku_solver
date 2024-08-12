@@ -1,149 +1,121 @@
-import numpy as np
-import time
 import sys
-from collections import deque
+import time
 
-call_count = 0
+call_count = 0  # Global variable to count the number of recursive calls
 
+def print_board(board):
+    """Helper function to print the board in a user-friendly format."""
+    for row in board:
+        print(" ".join(str(cell) if cell != 0 else '.' for cell in row))
+    print()
 
-class SudokuSolver():
-
-    # load the sudoku puzzle
-    def __init__(self, puzzle_file):
-        # Read the puzzle from a file with each row in a single line
-        self.puzzle = np.array([list(map(int, line.strip())) for line in open(puzzle_file)])
-        self.domains = {(i, j): {self.puzzle[i, j]} if self.puzzle[i, j] != 0 else set(
-            range(1, 10)) for i in range(9) for j in range(9)}
-        self.neighbors = {(x, y): set((i, j) for i in range(9) for j in range(9) if (x == i or y == j or (
-            x // 3 == i // 3 and y // 3 == j // 3)) and (x, y) != (i, j)) for x in range(9) for y in range(9)}
-
-    def print_board(self):
-        for row in self.puzzle:
-            print(" ".join(str(cell) if cell != 0 else '.' for cell in row))
-        print()
-
-    def solve(self):
-        assignment = dict()
-        for i in range(9):
-            for j in range(9):
-                if self.puzzle[i, j] != 0:
-                    assignment[(i, j)] = self.puzzle[i, j]
-        '''
-        self.ac3()
-        '''
-        return self.backtrack(assignment)
-
-    # Make x arc consistent with y
-    '''
-    def revise(self, x, y):
-        if y not in self.neighbors[x]:
+def is_valid(board, row, col, num):
+    """Check if it's valid to place the number 'num' in the position board[row][col]."""
+    # Check the row and column
+    for i in range(9):
+        if board[row][i] == num or board[i][col] == num:
             return False
-        else:
-            inconsistent = set()
-            revised = False
-            for x_val in self.domains[x]:
-                consistent = False
-                for y_val in self.domains[y]:
-                    if y_val != x_val:
-                        consistent = True
-                        break
-                if not consistent:
-                    revised = True
-                    inconsistent.add(x_val)
 
-            self.domains[x] = self.domains[x] - inconsistent
-
-        return revised
-        '''
-    '''
-    def ac3(self, arcs=None):
-        if arcs is None:
-            arcs = deque((x, y) for x in self.domains for y in self.domains[x])
-
-        while arcs:
-            x, y = arcs.popleft()
-            if self.revise(x, y):
-                if not self.domains[x]:
-                    return False
-                arcs.extend((z, x) for z in self.neighbors[x] if z != y)
-        return True
-    '''
-
-    def consistent(self, cell, value, assignment):
-        for y in self.neighbors[cell]:
-            if y in assignment and value == assignment[y]:
+    # Check the 3x3 sub-grid
+    start_row, start_col = 3 * (row // 3), 3 * (col // 3)
+    for i in range(start_row, start_row + 3):
+        for j in range(start_col, start_col + 3):
+            if board[i][j] == num:
                 return False
+
+    return True
+
+def find_empty_location(board):
+    """Find the empty location on the board with the minimum remaining values."""
+    min_possibilities = float('inf')
+    best_row, best_col = -1, -1
+
+    for row in range(9):
+        for col in range(9):
+            if board[row][col] == 0:
+                # Count the number of possibilities for this cell
+                possibilities = sum(is_valid(board, row, col, num) for num in range(1, 10))
+                if possibilities < min_possibilities:
+                    min_possibilities = possibilities
+                    best_row, best_col = row, col
+                    if min_possibilities == 1:
+                        return best_row, best_col
+
+    return best_row, best_col
+
+def get_least_constraining_values(board, row, col):
+    """Order possible values by least constraining value heuristic, considering only neighbors."""
+    constraints = {}
+    for num in range(1, 10):
+        if is_valid(board, row, col, num):
+            count = 0
+            # Consider only the neighbors of the cell
+            for r, c in get_neighbors(row, col):
+                if board[r][c] == 0 and is_valid(board, r, c, num):
+                    count += 1
+            constraints[num] = count
+    return sorted(constraints, key=constraints.get)
+
+def get_neighbors(row, col):
+    """Return the coordinates of neighbors of a given cell."""
+    neighbors = []
+    for r in range(9):
+        for c in range(9):
+            if (r == row or c == col or (row // 3 == r // 3 and col // 3 == c // 3)) and (r, c) != (row, col):
+                neighbors.append((r, c))
+    return neighbors
+
+def solve_sudoku(board):
+    """Solve the Sudoku puzzle using backtracking with heuristics."""
+    global call_count
+    call_count += 1
+
+    row, col = find_empty_location(board)
+    if row == -1 and col == -1:
         return True
 
-    def select_unassigned_cell(self, assignment):
-        return min((cell for cell in self.domains if cell not in assignment), key=lambda cell: len(self.domains[cell]))
+    for num in get_least_constraining_values(board, row, col):
+        if is_valid(board, row, col, num):
+            board[row][col] = num
+            if solve_sudoku(board):
+                return True
+            board[row][col] = 0
 
-    def order_domain_values(self, cell, assignment):
-        return sorted(self.domains[cell], key=lambda value: sum(value in self.domains[neighbor] for neighbor in self.neighbors[cell] if neighbor not in assignment))
+    return False
 
-    def backtrack(self, assignment):
-        global call_count
-        call_count += 1
-        if len(assignment) == len(self.domains):
-            return assignment
-
-        cell = self.select_unassigned_cell(assignment)
-        for value in self.order_domain_values(cell, assignment):
-            if self.consistent(cell, value, assignment):
-                assignment[cell] = value
-                '''
-                inferences = self.inference(cell, assignment)
-                if inferences:
-                    assignment.update(inferences)
-                '''
-                result = self.backtrack(assignment)
-                if result:
-                    return result
-                '''
-                if inferences:
-                    for inference in inferences:
-                        assignment.pop(inference)
-                '''
-                assignment.pop(cell)
-
-        return None
-    '''
-    def inference(self, cell, assignment):
-        inferences = {}
-        queue = deque((neighbor, cell) for neighbor in self.neighbors[cell])
-
-        if self.ac3(queue):
-            for c in self.domains:
-                if c not in assignment and len(self.domains[c]) == 1:
-                    inferences[c] = list(self.domains[c])[0]
-            return inferences
-        return None
-    '''
-
+def read_board_from_file(filename):
+    """Read the Sudoku board from a text file with no spaces between numbers."""
+    board = []
+    with open(filename, 'r') as file:
+        for line in file:
+            # Convert each character to an integer and append the row to the board
+            board.append([int(char) for char in line.strip()])
+    return board
 
 def main():
-
     if len(sys.argv) != 2:
-        sys.exit("Usage: python sudoku.py sudoku.txt")
+        print("Usage: python sudoku_solver.py <sudoku_file.txt>")
+        sys.exit(1)
 
-    sudoku = SudokuSolver(sys.argv[1])
-    start = time.time()
-    sudoku.print_board()
-    assignment = sudoku.solve()
+    filename = sys.argv[1]
+    board = read_board_from_file(filename)
 
-    if assignment is None:
-        print("No solution.")
+    print("Original board:")
+    print_board(board)
+
+    start_time = time.time()
+
+    if solve_sudoku(board):
+        print("Solved board:")
+        print_board(board)
     else:
-        end = time.time()
-        length = end - start
-        print("Solved")
-        print("It took", length, "seconds!")
-        print(f"Number of recursive calls: {call_count}")
-        for i in range(9):
-            for j in range(9):
-                print(assignment[(i, j)], end=" ")
-            print()
+        print("No solution exists.")
 
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+
+    print(f"Number of recursive calls: {call_count}")
+    print(f"Solving time: {elapsed_time:.4f} seconds")
 
 if __name__ == "__main__":
     main()
